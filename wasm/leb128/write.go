@@ -41,6 +41,45 @@ func AppendSleb128(b []byte, v int64) []byte {
 	return b
 }
 
+// WriteUleb128 writes v to b using unsigned LEB128 encoding. b is assumed to be the correct length.
+// It returns the size of the encoded value in bytes
+func WriteUleb128(b []byte, v uint64) int {
+	var idx int
+	for {
+		c := uint8(v & 0x7f)
+		v >>= 7
+		if v != 0 {
+			c |= 0x80
+		}
+		b[idx] = c
+		idx++
+		if c&0x80 == 0 {
+			break
+		}
+	}
+	return idx
+}
+
+// WriteSleb128 writes v to b using signed LEB128 encoding. b is assumed to be the correct length.
+// It returns the size of the encoded value in bytes
+func WriteSleb128(b []byte, v int64) int {
+	var idx int
+	for {
+		c := uint8(v & 0x7f)
+		s := uint8(v & 0x40)
+		v >>= 7
+		if (v != -1 || s == 0) && (v != 0 || s != 0) {
+			c |= 0x80
+		}
+		b[idx] = c
+		idx++
+		if c&0x80 == 0 {
+			break
+		}
+	}
+	return idx
+}
+
 // WriteVarUint32 writes a LEB128 encoded unsigned 32-bit integer to w.
 // It returns the integer value, the size of the encoded value (in bytes), and
 // the error (if any).

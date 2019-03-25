@@ -17,6 +17,13 @@ import (
 
 // vibhavp: TODO: We do not verify whether blocks don't access for the parent block, do that.
 func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Module) (*mockVM, error) {
+	var code []byte
+	if len(body.Code) != 0 && body.Code[len(body.Code)-1] == ops.End {
+		code = body.Code[:len(body.Code)-1]
+	} else {
+		code = body.Code
+	}
+
 	vm := &mockVM{
 		stack:      make([]operand, 0, 6),
 		code:       bytes.NewReader(body.Code),

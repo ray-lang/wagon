@@ -51,6 +51,7 @@ type Module struct {
 	Elements *SectionElements
 	Code     *SectionCode
 	Data     *SectionData
+	Name     *NameSection
 	Customs  []*SectionCustom
 
 	// The function index space of the module
@@ -86,18 +87,35 @@ func (m *Module) Custom(name string) *SectionCustom {
 	return nil
 }
 
+func (m *Module) Populate() error {
+	for _, fn := range []func() error{
+		m.populateGlobals,
+		m.populateFunctions,
+		m.populateTables,
+		m.populateLinearMemory,
+	} {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // NewModule creates a new empty module
 func NewModule() *Module {
 	return &Module{
-		Types:    &SectionTypes{},
-		Import:   &SectionImports{},
-		Table:    &SectionTables{},
-		Memory:   &SectionMemories{},
-		Global:   &SectionGlobals{},
-		Export:   &SectionExports{},
+		Types:    &SectionTypes{Entries: []FunctionSig{}},
+		Import:   &SectionImports{Entries: []ImportEntry{}},
+		Function: &SectionFunctions{Types: []uint32{}},
+		Table:    &SectionTables{Entries: []Table{}},
+		Memory:   &SectionMemories{Entries: []Memory{}},
+		Global:   &SectionGlobals{Globals: []GlobalEntry{}},
+		Export:   &SectionExports{Entries: map[string]ExportEntry{}, Names: []string{}},
 		Start:    &SectionStartFunction{},
-		Elements: &SectionElements{},
-		Data:     &SectionData{},
+		Code:     &SectionCode{Bodies: []FunctionBody{}},
+		Elements: &SectionElements{Entries: []ElementSegment{}},
+		Data:     &SectionData{Entries: []DataSegment{}},
+		Customs:  []*SectionCustom{},
 	}
 }
 

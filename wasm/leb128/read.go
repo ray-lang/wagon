@@ -11,6 +11,7 @@ import (
 	"io"
 )
 
+<<<<<<< HEAD
 // readVarUint reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
 // readVarUint panics if n>64.
 func readVarUint(r io.Reader, n uint) (uint64, error) {
@@ -24,6 +25,26 @@ func readVarUint(r io.Reader, n uint) (uint64, error) {
 		_, err := io.ReadFull(r, p)
 		if err != nil {
 			return 0, err
+=======
+// ReadVarUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
+// returns the integer value, and the error (if any).
+func ReadVarUint32(r io.Reader) (uint32, error) {
+	v, _, err := ReadVarUint32Size(r)
+	return v, err
+}
+
+func ReadVarUint32Size(r io.Reader) (uint32, uint32, error) {
+	var (
+		b     = make([]byte, 1)
+		shift uint
+		res   uint32
+		size  uint32
+		err   error
+	)
+	for {
+		if _, err = io.ReadFull(r, b); err != nil {
+			return res, size, err
+>>>>>>> b435882... Add sizing to function bodies.
 		}
 		b := uint64(p[0])
 		switch {

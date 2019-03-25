@@ -16,28 +16,42 @@ const currentVersion = 0x01
 
 // EncodeModule writes a provided module to w using WASM binary encoding.
 func EncodeModule(w io.Writer, m *Module) error {
+	var offset uint32
 	if err := writeU32(w, Magic); err != nil {
 		return err
 	}
 	if err := writeU32(w, currentVersion); err != nil {
 		return err
 	}
+
+	offset += 8 // 4 for magic and 4 for version
 	sections := m.Sections
 	buf := new(bytes.Buffer)
 	for _, s := range sections {
-		if _, err := leb128.WriteVarUint32(w, uint32(s.SectionID())); err != nil {
+		var err error
+		var size int
+		if size, err = leb128.WriteVarUint32(w, uint32(s.SectionID())); err != nil {
 			return err
 		}
+		offset += uint32(size)
 		buf.Reset()
+
+		rawSec := s.GetRawSection()
+		rawSec.Start = int64(offset)
 		if err := s.WritePayload(buf); err != nil {
 			return err
 		}
-		if _, err := leb128.WriteVarUint32(w, uint32(buf.Len())); err != nil {
+
+		if size, err = leb128.WriteVarUint32(w, uint32(buf.Len())); err != nil {
 			return err
 		}
+
+		offset += uint32(size + buf.Len())
 		if _, err := buf.WriteTo(w); err != nil {
 			return err
 		}
+
+		rawSec.End = int64(offset)
 	}
 	return nil
 }

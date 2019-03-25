@@ -155,9 +155,7 @@ func (sr *sectionsReader) readSection(r *readpos.ReadPos) (bool, error) {
 	}
 
 	logger.Printf("Section payload length: %d", payloadDataLen)
-
 	s.Start = r.CurPos
-
 	sectionBytes := new(bytes.Buffer)
 
 	sectionBytes.Grow(int(getInitialCap(payloadDataLen)))
@@ -217,14 +215,20 @@ func (sr *sectionsReader) readSection(r *readpos.ReadPos) (bool, error) {
 	default:
 		return false, InvalidSectionIDError(s.ID)
 	}
+
+	// assign the raw section before we read
+	*sec.GetRawSection() = s
+
 	err = sec.ReadPayload(sectionReader)
 	if err != nil {
 		logger.Println(err)
 		return false, err
 	}
-	s.End = r.CurPos
-	s.Bytes = sectionBytes.Bytes()
-	*sec.GetRawSection() = s
+
+	rawSec := sec.GetRawSection()
+	rawSec.End = r.CurPos
+	rawSec.Bytes = sectionBytes.Bytes()
+
 	switch s.ID {
 	case SectionIDCode:
 		s := m.Code
@@ -239,6 +243,15 @@ func (sr *sectionsReader) readSection(r *readpos.ReadPos) (bool, error) {
 		}
 		for i := range s.Bodies {
 			s.Bodies[i].Module = m
+		}
+	case SectionIDCustom:
+		cus := sec.(*SectionCustom)
+		if cus.Name == CustomSectionName {
+			m.Name = &NameSection{}
+			if err = m.Name.UnmarshalWASM(bytes.NewReader(cus.Data)); err != nil {
+				logger.Println(err)
+				return false, err
+			}
 		}
 	}
 	m.Sections = append(m.Sections, sec)
@@ -834,13 +847,14 @@ func (*SectionCode) SectionID() SectionID {
 }
 
 func (s *SectionCode) ReadPayload(r io.Reader) error {
-	count, err := leb128.ReadVarUint32(r)
+	count, countByteLen, err := leb128.ReadVarUint32Size(r)
 	if err != nil {
 		return err
 	}
 	s.Bodies = make([]FunctionBody, 0, getInitialCap(count))
 	logger.Printf("%d function bodies\n", count)
 
+	offset := countByteLen
 	for i := uint32(0); i < count; i++ {
 		logger.Printf("Reading function %d\n", i)
 		var body FunctionBody
@@ -848,18 +862,25 @@ func (s *SectionCode) ReadPayload(r io.Reader) error {
 			return err
 		}
 		s.Bodies = append(s.Bodies, body)
+		offset = body.calculateBounds(offset)
 	}
 	return nil
 }
 
 func (s *SectionCode) WritePayload(w io.Writer) error {
-	if _, err := leb128.WriteVarUint32(w, uint32(len(s.Bodies))); err != nil {
+	var countByteLen int
+	var err error
+	if countByteLen, err = leb128.WriteVarUint32(w, uint32(len(s.Bodies))); err != nil {
 		return err
 	}
-	for _, b := range s.Bodies {
-		if err := b.MarshalWASM(w); err != nil {
+
+	offset := uint32(countByteLen)
+	for i := range s.Bodies {
+		body := &s.Bodies[i]
+		if err := body.MarshalWASM(w); err != nil {
 			return err
 		}
+		offset = body.calculateBounds(offset)
 	}
 	return nil
 }
@@ -870,6 +891,9 @@ type FunctionBody struct {
 	Module *Module // The parent module containing this function body, for execution purposes
 	Locals []LocalEntry
 	Code   []byte
+	Start  uint32 // start of body in the code section
+	End    uint32 // end of the body in the code section
+	size   uint32 // size of the body (including locals)
 }
 
 func (f *FunctionBody) UnmarshalWASM(r io.Reader) error {
@@ -884,6 +908,7 @@ func (f *FunctionBody) UnmarshalWASM(r io.Reader) error {
 		return err
 	}
 
+	f.size = bodySize
 	bytesReader := bytes.NewBuffer(body)
 
 	localCount, err := leb128.ReadVarUint32(bytesReader)
@@ -909,8 +934,7 @@ func (f *FunctionBody) UnmarshalWASM(r io.Reader) error {
 		return ErrFunctionNoEnd
 	}
 
-	f.Code = code[:len(code)-1]
-
+	f.Code = code
 	return nil
 }
 
@@ -924,11 +948,27 @@ func (f *FunctionBody) MarshalWASM(w io.Writer) error {
 			return err
 		}
 	}
+
+	if f.Code[len(f.Code)-1] != end {
+		return ErrFunctionNoEnd
+	}
+
 	if _, err := body.Write(f.Code); err != nil {
 		return err
 	}
-	body.WriteByte(end)
+	f.size = uint32(body.Len())
+	f.End = f.Start + f.size
 	return writeBytesUint(w, body.Bytes())
+}
+
+func (f *FunctionBody) calculateBounds(offset uint32) uint32 {
+	bodySizeByteLen := uint32(leb128.Uleb128Len(uint64(f.size)))
+	codeLen := uint32(len(f.Code))
+	localsLen := f.size - codeLen
+	relStart := bodySizeByteLen + localsLen
+	f.Start = offset + relStart
+	f.End = f.Start + codeLen
+	return f.End
 }
 
 type LocalEntry struct {
@@ -973,10 +1013,11 @@ func (*SectionData) SectionID() SectionID {
 }
 
 func (s *SectionData) ReadPayload(r io.Reader) error {
-	count, err := leb128.ReadVarUint32(r)
+	count, countByteLen, err := leb128.ReadVarUint32Size(r)
 	if err != nil {
 		return err
 	}
+	offset := countByteLen
 	s.Entries = make([]DataSegment, 0, getInitialCap(count))
 	for i := uint32(0); i < count; i++ {
 		var entry DataSegment
@@ -984,18 +1025,24 @@ func (s *SectionData) ReadPayload(r io.Reader) error {
 			return err
 		}
 		s.Entries = append(s.Entries, entry)
+		offset = entry.calculateBounds(offset)
 	}
 	return nil
 }
 
 func (s *SectionData) WritePayload(w io.Writer) error {
-	if _, err := leb128.WriteVarUint32(w, uint32(len(s.Entries))); err != nil {
+	var countByteLen int
+	var err error
+	if countByteLen, err = leb128.WriteVarUint32(w, uint32(len(s.Entries))); err != nil {
 		return err
 	}
-	for _, e := range s.Entries {
+	offset := uint32(countByteLen)
+	for i := range s.Entries {
+		e := &s.Entries[i]
 		if err := e.MarshalWASM(w); err != nil {
 			return err
 		}
+		offset = e.calculateBounds(offset)
 	}
 	return nil
 }
@@ -1005,29 +1052,45 @@ type DataSegment struct {
 	Index  uint32 // The index into the global linear memory space, should always be 0 in the MVP.
 	Offset []byte // initializer expression for computing the offset for placing elements, should return an i32 value
 	Data   []byte
+	Start  uint32 // start of data segment in module
+	End    uint32 // end of the data segment in the module
 }
 
 func (s *DataSegment) UnmarshalWASM(r io.Reader) error {
 	var err error
-
 	if s.Index, err = leb128.ReadVarUint32(r); err != nil {
 		return err
 	}
+
 	if s.Offset, err = readInitExpr(r); err != nil {
 		return err
 	}
-	s.Data, err = readBytesUint(r)
+
+	if s.Data, err = readBytesUint(r); err != nil {
+		return err
+	}
 	return err
 }
 
 func (s *DataSegment) MarshalWASM(w io.Writer) error {
-	if _, err := leb128.WriteVarUint32(w, s.Index); err != nil {
+	var err error
+	if _, err = leb128.WriteVarUint32(w, s.Index); err != nil {
 		return err
 	}
-	if _, err := w.Write(s.Offset); err != nil {
+
+	if _, err = w.Write(s.Offset); err != nil {
 		return err
 	}
+
 	return writeBytesUint(w, s.Data)
+}
+
+func (s *DataSegment) calculateBounds(offset uint32) uint32 {
+	indexBytesLen := uint32(leb128.Uleb128Len(uint64(s.Index)))
+	s.Start = offset + indexBytesLen + uint32(len(s.Offset))
+	dataSizeBytesLen := uint32(leb128.Uleb128Len(uint64(len(s.Data))))
+	s.End = s.Start + dataSizeBytesLen + uint32(len(s.Data))
+	return s.End
 }
 
 // A list of well-known custom sections
@@ -1248,6 +1311,12 @@ func (m NameMap) MarshalWASM(w io.Writer) error {
 	sort.Slice(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
 	})
+
+	// write the number of names
+	if _, err := leb128.WriteVarUint32(w, uint32(len(keys))); err != nil {
+		return err
+	}
+
 	for _, k := range keys {
 		name := m[k]
 		if _, err := leb128.WriteVarUint32(w, k); err != nil {
