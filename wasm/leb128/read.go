@@ -11,55 +11,43 @@ import (
 	"io"
 )
 
-<<<<<<< HEAD
-// readVarUint reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
-// readVarUint panics if n>64.
-func readVarUint(r io.Reader, n uint) (uint64, error) {
+// readVarUintSize reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
+// readVarUintSize panics if n>64.
+func readVarUintSize(r io.Reader, n uint) (uint64, uint32, error) {
 	if n > 64 {
 		panic(errors.New("leb128: n must <= 64"))
 	}
 	p := make([]byte, 1)
 	var res uint64
+	var size uint32
 	var shift uint
 	for {
 		_, err := io.ReadFull(r, p)
 		if err != nil {
-			return 0, err
-=======
-// ReadVarUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
-// returns the integer value, and the error (if any).
-func ReadVarUint32(r io.Reader) (uint32, error) {
-	v, _, err := ReadVarUint32Size(r)
-	return v, err
-}
-
-func ReadVarUint32Size(r io.Reader) (uint32, uint32, error) {
-	var (
-		b     = make([]byte, 1)
-		shift uint
-		res   uint32
-		size  uint32
-		err   error
-	)
-	for {
-		if _, err = io.ReadFull(r, b); err != nil {
-			return res, size, err
->>>>>>> b435882... Add sizing to function bodies.
+			return 0, 0, err
 		}
+		size++
 		b := uint64(p[0])
 		switch {
 		// note: can not use b < 1<<n, when n == 64, 1<<n will overflow to 0
 		case b < 1<<7 && b <= 1<<n-1:
 			res += (1 << shift) * b
-			return res, nil
+			return res, size, nil
 		case b >= 1<<7 && n > 7:
 			res += (1 << shift) * (b - 1<<7)
 			shift += 7
 			n -= 7
 		default:
-			return 0, errors.New("leb128: invalid uint")
+			return 0, 0, errors.New("leb128: invalid uint")
 		}
 	}
+}
+
+// readVarUint reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
+// readVarUint panics if n>64.
+func readVarUint(r io.Reader, n uint) (uint64, error) {
+	v, _, err := readVarUintSize(r, n)
+	return v, err
 }
 
 // readVarint reads a signed integer of size n, defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
@@ -92,6 +80,16 @@ func readVarint(r io.Reader, n uint) (int64, error) {
 			return 0, errors.New("leb128: invalid int")
 		}
 	}
+}
+
+// ReadVarUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
+// returns the integer value, and the error (if any).
+func ReadVarUint32Size(r io.Reader) (uint32, uint32, error) {
+	n, size, err := readVarUintSize(r, 32)
+	if err != nil {
+		return 0, 0, err
+	}
+	return uint32(n), size, nil
 }
 
 // ReadVarUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
