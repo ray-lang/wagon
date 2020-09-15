@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-interpreter/wagon/wasm"
+	"github.com/ray-lang/wagon/wasm"
 )
 
 var testPaths = []string{
