@@ -37,22 +37,24 @@ func (fct *Function) IsHost() bool {
 // Module represents a parsed WebAssembly module:
 // http://webassembly.org/docs/modules/
 type Module struct {
-	Version  uint32
-	Sections []Section
+	Version    uint32
+	SourcePath string
+	Sections   []Section
 
-	Types    *SectionTypes
-	Import   *SectionImports
-	Function *SectionFunctions
-	Table    *SectionTables
-	Memory   *SectionMemories
-	Global   *SectionGlobals
-	Export   *SectionExports
-	Start    *SectionStartFunction
-	Elements *SectionElements
-	Code     *SectionCode
-	Data     *SectionData
-	Name     *NameSection
-	Customs  []*SectionCustom
+	Types     *SectionTypes
+	Import    *SectionImports
+	Function  *SectionFunctions
+	Table     *SectionTables
+	Memory    *SectionMemories
+	Global    *SectionGlobals
+	Export    *SectionExports
+	Start     *SectionStartFunction
+	Elements  *SectionElements
+	Code      *SectionCode
+	Data      *SectionData
+	DataCount *SectionDataCount
+	Name      *NameSection
+	Customs   []*SectionCustom
 
 	// The function index space of the module
 	FunctionIndexSpace []Function

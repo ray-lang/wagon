@@ -33,34 +33,36 @@ type Section interface {
 type SectionID uint8
 
 const (
-	SectionIDCustom   SectionID = 0
-	SectionIDType     SectionID = 1
-	SectionIDImport   SectionID = 2
-	SectionIDFunction SectionID = 3
-	SectionIDTable    SectionID = 4
-	SectionIDMemory   SectionID = 5
-	SectionIDGlobal   SectionID = 6
-	SectionIDExport   SectionID = 7
-	SectionIDStart    SectionID = 8
-	SectionIDElement  SectionID = 9
-	SectionIDCode     SectionID = 10
-	SectionIDData     SectionID = 11
+	SectionIDCustom    SectionID = 0
+	SectionIDType      SectionID = 1
+	SectionIDImport    SectionID = 2
+	SectionIDFunction  SectionID = 3
+	SectionIDTable     SectionID = 4
+	SectionIDMemory    SectionID = 5
+	SectionIDGlobal    SectionID = 6
+	SectionIDExport    SectionID = 7
+	SectionIDStart     SectionID = 8
+	SectionIDElement   SectionID = 9
+	SectionIDCode      SectionID = 10
+	SectionIDData      SectionID = 11
+	SectionIDDataCount SectionID = 12
 )
 
 func (s SectionID) String() string {
 	n, ok := map[SectionID]string{
-		SectionIDCustom:   "custom",
-		SectionIDType:     "type",
-		SectionIDImport:   "import",
-		SectionIDFunction: "function",
-		SectionIDTable:    "table",
-		SectionIDMemory:   "memory",
-		SectionIDGlobal:   "global",
-		SectionIDExport:   "export",
-		SectionIDStart:    "start",
-		SectionIDElement:  "element",
-		SectionIDCode:     "code",
-		SectionIDData:     "data",
+		SectionIDCustom:    "custom",
+		SectionIDType:      "type",
+		SectionIDImport:    "import",
+		SectionIDFunction:  "function",
+		SectionIDTable:     "table",
+		SectionIDMemory:    "memory",
+		SectionIDGlobal:    "global",
+		SectionIDExport:    "export",
+		SectionIDStart:     "start",
+		SectionIDElement:   "element",
+		SectionIDCode:      "code",
+		SectionIDData:      "data",
+		SectionIDDataCount: "data-count",
 	}[s]
 	if !ok {
 		return "unknown"
@@ -212,6 +214,11 @@ func (sr *sectionsReader) readSection(r *readpos.ReadPos) (bool, error) {
 		logger.Println("section data")
 		m.Data = &SectionData{}
 		sec = m.Data
+	case SectionIDDataCount:
+		// TODO: read the section
+		logger.Println("section data count")
+		m.DataCount = &SectionDataCount{}
+		sec = m.DataCount
 	default:
 		return false, InvalidSectionIDError(s.ID)
 	}
@@ -862,7 +869,7 @@ func (s *SectionCode) ReadPayload(r io.Reader) error {
 			return err
 		}
 		s.Bodies = append(s.Bodies, body)
-		offset = body.calculateBounds(offset)
+		offset = body.CalculateBounds(offset)
 	}
 	return nil
 }
@@ -880,7 +887,7 @@ func (s *SectionCode) WritePayload(w io.Writer) error {
 		if err := body.MarshalWASM(w); err != nil {
 			return err
 		}
-		offset = body.calculateBounds(offset)
+		offset = body.CalculateBounds(offset)
 	}
 	return nil
 }
@@ -961,7 +968,7 @@ func (f *FunctionBody) MarshalWASM(w io.Writer) error {
 	return writeBytesUint(w, body.Bytes())
 }
 
-func (f *FunctionBody) calculateBounds(offset uint32) uint32 {
+func (f *FunctionBody) CalculateBounds(offset uint32) uint32 {
 	bodySizeByteLen := uint32(leb128.Uleb128Len(uint64(f.size)))
 	codeLen := uint32(len(f.Code))
 	localsLen := f.size - codeLen
@@ -1091,6 +1098,27 @@ func (s *DataSegment) calculateBounds(offset uint32) uint32 {
 	dataSizeBytesLen := uint32(leb128.Uleb128Len(uint64(len(s.Data))))
 	s.End = s.Start + dataSizeBytesLen + uint32(len(s.Data))
 	return s.End
+}
+
+// SectionDataCount is a section that stores the count of data segments.
+type SectionDataCount struct {
+	RawSection
+	Count uint32 // count of data segments
+}
+
+func (*SectionDataCount) SectionID() SectionID {
+	return SectionIDDataCount
+}
+
+func (s *SectionDataCount) ReadPayload(r io.Reader) error {
+	var err error
+	s.Count, err = leb128.ReadVarUint32(r)
+	return err
+}
+
+func (s *SectionDataCount) WritePayload(w io.Writer) error {
+	_, err := leb128.WriteVarUint32(w, s.Count)
+	return err
 }
 
 // A list of well-known custom sections
